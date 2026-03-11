@@ -144,6 +144,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# GCP service account credentials
+credentials/
+
 # Spyder project settings
 .spyderproject
 .spyproject
