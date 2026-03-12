@@ -26,7 +26,7 @@ def validate_env():
         missing.append("SHOPIFY_STORE_DOMAIN")
     
     if not GCS_BUCKET_NAME:
-        missing.append("GCS-BUCKET-NAME")
+        missing.append("GCS_BUCKET_NAME")
     
     if missing:
         raise ValueError(f"Missing required configurations: {', '.join(missing)}")
@@ -67,13 +67,16 @@ def upload_json_to_gcs(bucket_name: str, blob_name: str, payload: dict) -> None:
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
 
+    print(f"Uploading to bucket: {bucket_name}")
+    print(f"Uploading to blob: {blob_name}")
+
     blob.upload_from_string(
         json.dumps(payload, indent=2),
         content_type="application/json",
     )
 
-    print(f"Uploading to bucket: {bucket_name}")
-    print(f"Uploading to blob: {blob_name}")
+    print(f"Uploaded to bucket: {bucket_name}")
+    print(f"Uploaded to blob: {blob_name}")
 
     print("Upload complete.")
     print(f"GCS path: gs://{bucket_name}/{blob_name}")
