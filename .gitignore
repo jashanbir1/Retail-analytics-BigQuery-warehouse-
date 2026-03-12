@@ -147,6 +147,10 @@ venv.bak/
 # GCP service account credentials
 credentials/
 
+#.DS_Store
+credentials/
+credentials/*.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
