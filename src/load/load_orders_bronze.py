@@ -70,13 +70,29 @@ def create_table_if_not_exists(client: bigquery.Client, table_id: str) -> None:
         print(f"Table already exists: {table_id}")
 
 
-def load_rows_to_bigquery(client: bigquery.Client, table_id: str, rows: list[dict]) -> None:
-    errors = client.insert_rows_json(table_id, rows)
+def load_rows_into_bigquery(client: bigquery.Client, table_id: str, rows: list[dict]):
+    schema = [
+        bigquery.SchemaField("order_id", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("extract_date", "DATE", mode="REQUIRED"),
+        bigquery.SchemaField("ingested_at", "TIMESTAMP", mode="REQUIRED"),
+        bigquery.SchemaField("source_file_path", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("raw_payload", "STRING", mode="REQUIRED"),
+    ]
 
-    if errors:
-        raise RuntimeError(f"BigQuery insert failed: {errors}")
+    job_config = bigquery.LoadJobConfig(
+        schema=schema,
+        write_disposition="WRITE_TRUNCATE",
+    )
 
-    print(f"Inserted {len(rows)} rows into {table_id}")
+    job = client.load_table_from_json(
+        rows,
+        table_id,
+        job_config=job_config,
+    )
+
+    job.result()
+
+    print(f"Load successful: {len(rows)} orders loaded into {table_id}")
 
 
 def main() -> None:
@@ -100,7 +116,7 @@ def main() -> None:
     create_table_if_not_exists(bq_client, table_id)
 
     print("Loading rows into BigQuery...")
-    load_rows_to_bigquery(bq_client, table_id, bronze_rows)
+    load_rows_into_bigquery(bq_client, table_id, bronze_rows)
 
     print("Bronze load complete.")
 
