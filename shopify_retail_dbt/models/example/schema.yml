@@ -1,21 +1,72 @@
-
 version: 2
 
 models:
-  - name: my_first_dbt_model
-    description: "A starter dbt model"
+  - name: silver_customers
+    description: One row per customer from Shopify bronze customer payloads.
     columns:
-      - name: id
-        description: "The primary key for this table"
-        data_tests:
+      - name: customer_id
+        description: Shopify customer ID.
+        tests:
+          - not_null
           - unique
+
+      - name: email
+        description: Customer email address.
+
+      - name: orders_count
+        description: Number of orders for the customer.
+        tests:
           - not_null
 
-  - name: my_second_dbt_model
-    description: "A starter dbt model"
+  - name: silver_customers_addresses
+    description: One row per customer address from Shopify bronze customer payloads.
     columns:
-      - name: id
-        description: "The primary key for this table"
-        data_tests:
+      - name: address_id
+        description: Shopify address ID.
+        tests:
+          - not_null
           - unique
+
+      - name: customer_id
+        description: Parent customer ID for the address.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_customers')
+              field: customer_id
+
+  - name: silver_products
+    description: One row per Shopify product.
+    columns:
+      - name: product_id
+        description: Shopify product ID.
+        tests:
+          - not_null
+          - unique
+
+      - name: product_title
+        description: Product title from Shopify payload.
+        tests:
+          - not_null
+
+  - name: silver_products_variants
+    description: One row per Shopify product variant.
+    columns:
+      - name: variant_id
+        description: Shopify product variant ID.
+        tests:
+          - not_null
+          - unique
+
+      - name: product_id
+        description: Parent product ID for the variant.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_products')
+              field: product_id
+
+      - name: variant_price
+        description: Variant price.
+        tests:
           - not_null
