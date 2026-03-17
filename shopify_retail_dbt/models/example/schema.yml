@@ -32,8 +32,9 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('silver_customers')
-              field: customer_id
+              arguments:
+                to: ref('silver_customers')
+                field: customer_id
 
   - name: silver_products
     description: One row per Shopify product.
@@ -63,10 +64,74 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('silver_products')
-              field: product_id
+              arguments:
+                to: ref('silver_products')
+                field: product_id
 
       - name: variant_price
         description: Variant price.
+        tests:
+          - not_null
+
+  - name: silver_orders
+    description: One row per Shopify order.
+    columns:
+      - name: order_id
+        description: Shopify order ID.
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: Customer ID associated with the order.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('silver_customers')
+                field: customer_id
+
+      - name: total_price
+        description: Total order value.
+        tests:
+          - not_null
+
+      - name: order_number
+        description: Shopify order number.
+        tests:
+          - not_null
+
+  - name: silver_order_line_items
+    description: One row per Shopify order line item.
+    columns:
+      - name: line_item_id
+        description: Shopify line item ID.
+        tests:
+          - not_null
+
+      - name: order_id
+        description: Parent Shopify order ID.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('silver_orders')
+                field: order_id
+
+      - name: product_id
+        description: Parent Shopify product ID.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('silver_products')
+                field: product_id
+
+      - name: quantity
+        description: Quantity purchased on the line item.
+        tests:
+          - not_null
+
+      - name: unit_price
+        description: Unit price of the line item.
         tests:
           - not_null
