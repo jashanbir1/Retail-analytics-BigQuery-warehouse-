@@ -1,5 +1,7 @@
 {{ config(materialized='table') }}
 
+-- silver_orders = one row per order (order header: who placed it, when it happened, total order value, overall status)
+-- silver_order_line_items = one row per item on an order (order detail: what product/variant was bought, quantity, unit price)
 WITH bronze_orders_cte AS (
     SELECT
         order_id,
