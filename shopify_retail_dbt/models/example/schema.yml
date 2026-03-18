@@ -159,6 +159,24 @@ models:
         tests:
           - not_null
 
+  - name: dim_product_variants
+    description: Product variant dimension table used for analytics joins.
+    columns:
+      - name: variant_id
+        description: Business key for the product variant dimension.
+        tests:
+          - not_null
+          - unique
+
+      - name: product_id
+        description: Parent product business key for the variant.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: product_id
+
   - name: dim_date
     description: Calendar date dimension used for time-based reporting.
     columns:
@@ -167,3 +185,67 @@ models:
         tests:
           - not_null
           - unique
+
+  - name: fact_order_line_items
+    description: Central sales fact table with one row per sold order line item.
+    columns:
+      - name: line_item_id
+        description: Business key for the sold line item.
+        tests:
+          - not_null
+
+      - name: order_id
+        description: Parent order business key.
+        tests:
+          - not_null
+
+      - name: customer_id
+        description: Customer business key associated with the sold line item.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: product_id
+        description: Product business key associated with the sold line item.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: product_id
+
+      - name: variant_id
+        description: Product variant business key associated with the sold line item.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product_variants')
+                field: variant_id
+
+      - name: order_date
+        description: Calendar date of the order.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+
+      - name: quantity
+        description: Quantity sold on the line item.
+        tests:
+          - not_null
+
+      - name: unit_price
+        description: Unit selling price on the line item.
+        tests:
+          - not_null
+
+      - name: line_revenue
+        description: Extended revenue for the line item calculated as quantity times unit price.
+        tests:
+          - not_null
