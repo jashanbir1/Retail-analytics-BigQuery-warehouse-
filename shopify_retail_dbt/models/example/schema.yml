@@ -14,7 +14,7 @@ models:
         description: Customer email address.
 
       - name: orders_count
-        description: Number of orders for the customer.
+        description: Number of orders associated with the customer.
         tests:
           - not_null
 
@@ -22,7 +22,7 @@ models:
     description: One row per customer address from Shopify bronze customer payloads.
     columns:
       - name: address_id
-        description: Shopify address ID.
+        description: Shopify customer address ID.
         tests:
           - not_null
           - unique
@@ -46,7 +46,7 @@ models:
           - unique
 
       - name: product_title
-        description: Product title from Shopify payload.
+        description: Product title from the Shopify payload.
         tests:
           - not_null
 
@@ -60,7 +60,7 @@ models:
           - unique
 
       - name: product_id
-        description: Parent product ID for the variant.
+        description: Parent Shopify product ID for the variant.
         tests:
           - not_null
           - relationships:
@@ -69,7 +69,7 @@ models:
                 field: product_id
 
       - name: variant_price
-        description: Variant price.
+        description: Price of the product variant.
         tests:
           - not_null
 
@@ -119,7 +119,7 @@ models:
                 field: order_id
 
       - name: product_id
-        description: Parent Shopify product ID.
+        description: Parent Shopify product ID on the line item.
         tests:
           - relationships:
               arguments:
@@ -135,3 +135,35 @@ models:
         description: Unit price of the line item.
         tests:
           - not_null
+
+  - name: dim_customers
+    description: Customer dimension table used for analytics joins.
+    columns:
+      - name: customer_id
+        description: Business key for the customer dimension.
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_products
+    description: Product dimension table used for analytics joins.
+    columns:
+      - name: product_id
+        description: Business key for the product dimension.
+        tests:
+          - not_null
+          - unique
+
+      - name: product_title
+        description: Product title used for reporting and slicing.
+        tests:
+          - not_null
+
+  - name: dim_date
+    description: Calendar date dimension used for time-based reporting.
+    columns:
+      - name: date_day
+        description: Calendar date key.
+        tests:
+          - not_null
+          - unique
