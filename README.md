@@ -46,7 +46,6 @@ Airflow orchestrates:
 
 ## Repository Structure
 
-```text
 airflow/
   dags/
     Data_warehouse_pipeline_dag.py
@@ -73,18 +72,19 @@ shopify_retail_dbt/
 
 ## Environments
 
+
 This project uses three Python environments:
 
-### 1. `venv`
+1. `venv`
 Used for:
 - Shopify extract scripts
 - BigQuery bronze load scripts
 
-### 2. `venv312`
+ 2. `venv312`
 Used for:
 - dbt
 
-### 3. `airflow_venv`
+3. `airflow_venv`
 Used for:
 - Apache Airflow
 
