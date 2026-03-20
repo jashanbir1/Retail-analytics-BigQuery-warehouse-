@@ -56,8 +56,6 @@ src/
     extract_customers_to_gcs.py
     extract_orders_to_gcs.py
     extract_products_to_gcs.py
-    seed_test_customers.py
-    seed_test_orders.py
     get_shopify_token.py
 
   load/
