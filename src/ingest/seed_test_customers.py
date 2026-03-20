@@ -15,19 +15,47 @@ SHOPIFY_STORE_DOMAIN = os.getenv("SHOPIFY_STORE_DOMAIN")
 
 SHOPIFY_GRAPHQL_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/api/2026-01/graphql.json"
 
-
 FIRST_NAMES = [
     "Aman", "Priya", "Jasleen", "Rohan", "Simran",
-    "David", "Maya", "Noah", "Ava", "Ethan"
+    "David", "Maya", "Noah", "Ava", "Ethan", "Jake",
+    "Gurdeep", "Ajambir", "Avrita", "Madison", "Kobe",
+    "Arjun", "Anaya", "Kabir", "Meera", "Isha",
+    "Sanjay", "Nina", "Dev", "Tara", "Zara",
+    "Liam", "Olivia", "Elijah", "Sophia", "Mason",
+    "Isabella", "Lucas", "Amelia", "Benjamin", "Harper",
+    "Aiden", "Charlotte", "Daniel", "Layla", "Sebastian",
+    "Chloe", "Isaac", "Grace", "Julian", "Ella",
+    "Mateo", "Camila", "Ryan", "Hannah", "Aria",
+    "Vivaan", "Diya", "Reyansh", "Anika", "Veer",
+    "Saanvi"
 ]
 
 LAST_NAMES = [
     "Mann", "Patel", "Singh", "Sharma", "Kaur",
-    "Johnson", "Lee", "Brown", "Garcia", "Wilson"
+    "Johnson", "Lee", "Brown", "Garcia", "Wilson",
+    "Santoyo", "Kaur", "Rodriguez", "Brar", "Beer",
+    "Bryant", "Gill", "Sandhu", "Dhillon", "Bains",
+    "Chahal", "Malhotra", "Kapoor", "Verma", "Joshi",
+    "Shah", "Mehta", "Desai", "Reddy", "Nair",
+    "Thomas", "Anderson", "Martinez", "Hernandez", "Lopez",
+    "Gonzalez", "Jackson", "White", "Harris", "Martin",
+    "Thompson", "Moore", "Clark", "Lewis", "Walker",
+    "Hall", "Allen", "Young", "King", "Wright",
+    "Scott", "Green", "Baker", "Adams", "Nelson",
+    "Carter"
 ]
 
 CITIES = [
-    "Los Angeles", "Toronto", "Ottawa", "Vancouver", "New York"
+    "Los Angeles", "Toronto", "Ottawa", "Vancouver", "New York",
+    "Brooklyn", "San Bernardino", "San Ramon", "Eastvale", "Corona",
+    "Riverside", "Irvine", "Anaheim", "San Diego", "San Jose",
+    "Sacramento", "Fresno", "Oakland", "Long Beach", "Pasadena",
+    "Seattle", "Portland", "Phoenix", "Scottsdale", "Las Vegas",
+    "Chicago", "Houston", "Dallas", "Austin", "Miami",
+    "Orlando", "Atlanta", "Boston", "Philadelphia", "Denver",
+    "San Francisco", "Mississauga", "Brampton", "Calgary", "Edmonton",
+    "Montreal", "Quebec City", "Winnipeg", "Hamilton", "Surrey",
+    "Burnaby", "Richmond", "Markham", "Burlington", "Kitchener"
 ]
 
 

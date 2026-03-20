@@ -18,7 +18,8 @@ BRONZE_DATASET = "retail_bronze"
 BRONZE_TABLE = "shopify_orders_raw"
 
 GCS_BUCKET_NAME = "jmann-bucket1-rdw"
-GCS_BLOB_NAME = "raw/shopify/orders/extract_date=2026-03-13/orders.json"
+EXTRACT_DATE = datetime.now().strftime("%Y-%m-%d")
+GCS_BLOB_NAME = f"raw/shopify/orders/extract_date={EXTRACT_DATE}/orders.json"
 
 
 def get_gcs_file_contents(bucket_name: str, blob_name: str) -> dict:

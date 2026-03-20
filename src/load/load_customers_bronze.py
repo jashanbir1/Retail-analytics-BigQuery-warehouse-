@@ -18,7 +18,8 @@ BRONZE_DATASET = "retail_bronze"
 BRONZE_TABLE = "shopify_customers_raw"
 
 GCS_BUCKET_NAME = "jmann-bucket1-rdw"
-GCS_BLOB_NAME = "raw/shopify/customers/extract_date=2026-03-13/customers.json"
+EXTRACT_DATE = datetime.now().strftime("%Y-%m-%d")
+GCS_BLOB_NAME = f"raw/shopify/customers/extract_date={EXTRACT_DATE}/customers.json"
 
 #extract raw contents from gcs raw landing zone
 def get_gcs_file_contents(bucket_name: str, blob_name: str):

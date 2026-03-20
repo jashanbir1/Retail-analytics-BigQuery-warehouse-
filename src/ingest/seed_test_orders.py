@@ -78,7 +78,6 @@ def build_variant_pool(products: list[dict]) -> list[dict]:
             except ValueError:
                 price = 0.0
 
-            # Skip gift cards and zero/negative priced variants for cleaner seeded orders
             if product.get("product_type") == "giftcard":
                 continue
             if price <= 0:
@@ -97,15 +96,54 @@ def build_variant_pool(products: list[dict]) -> list[dict]:
     return variant_pool
 
 
+def pick_financial_status() -> str:
+    return random.choices(
+        population=["paid", "pending", "authorized"],
+        weights=[0.65, 0.20, 0.15],
+        k=1,
+    )[0]
+
+
+def pick_fulfillment_status(financial_status: str) -> str | None:
+    if financial_status == "paid":
+        return random.choices(
+            population=["fulfilled", None],
+            weights=[0.70, 0.30],
+            k=1,
+        )[0]
+
+    return random.choices(
+        population=[None, "fulfilled"],
+        weights=[0.85, 0.15],
+        k=1,
+    )[0]
+
+
+def pick_order_tags() -> str | None:
+    possible_tags = [
+        "dev-store",
+        "promo",
+        "return-risk",
+        "vip-customer",
+        "first-time-buyer",
+        "bundle-order",
+    ]
+
+    selected = random.sample(possible_tags, k=random.randint(0, 2))
+
+    if not selected:
+        return None
+
+    return ", ".join(selected)
+
+
 def build_order_payload(customer: dict, variant_pool: list[dict]) -> dict:
-    selected_variants = random.sample(
-        variant_pool,
-        k=min(random.randint(1, 2), len(variant_pool)),
-    )
+    num_variants = min(random.randint(1, 4), len(variant_pool))
+    selected_variants = random.sample(variant_pool, k=num_variants)
 
     line_items = []
     for variant in selected_variants:
-        quantity = random.randint(1, 3)
+        quantity = random.randint(1, 4)
         line_items.append(
             {
                 "variant_id": variant["variant_id"],
@@ -113,20 +151,28 @@ def build_order_payload(customer: dict, variant_pool: list[dict]) -> dict:
             }
         )
 
+    financial_status = pick_financial_status()
+    fulfillment_status = pick_fulfillment_status(financial_status)
+    tags = pick_order_tags()
+
     order_payload = {
         "order": {
             "customer": {
                 "id": customer["id"],
             },
             "line_items": line_items,
-            "financial_status": "paid",
-            "fulfillment_status": "fulfilled",
+            "financial_status": financial_status,
             "send_receipt": False,
             "send_fulfillment_receipt": False,
-            "tags": "seeded,pipeline_test",
             "inventory_behaviour": "decrement_ignoring_policy",
         }
     }
+
+    if tags is not None:
+        order_payload["order"]["tags"] = tags
+
+    if fulfillment_status is not None:
+        order_payload["order"]["fulfillment_status"] = fulfillment_status
 
     return order_payload
 
@@ -155,6 +201,7 @@ def create_order(access_token: str, order_payload: dict) -> dict:
     payload = response.json()
     return payload["order"]
 
+
 def main() -> None:
     validate_env()
 
@@ -170,7 +217,7 @@ def main() -> None:
     if not variant_pool:
         raise RuntimeError("No usable product variants found for order seeding.")
 
-    target_count = 2
+    target_count = 5
     created = 0
 
     for i in range(target_count):
@@ -188,12 +235,13 @@ def main() -> None:
             f"Created order {created}: "
             f"order_id={order['id']} "
             f"order_name={order.get('name')} "
-            f"customer_id={customer['id']}"
+            f"customer_id={customer['id']} "
+            f"financial_status={order.get('financial_status')} "
+            f"fulfillment_status={order.get('fulfillment_status')}"
         )
 
-        # Small pause between creates to be safer with dev store limits
         if i < target_count - 1:
-            time.sleep(15)
+            time.sleep(10)
 
     print(f"Finished. Orders created: {created}")
 

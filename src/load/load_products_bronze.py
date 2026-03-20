@@ -18,7 +18,8 @@ BRONZE_DATASET = "retail_bronze"
 BRONZE_TABLE = "shopify_products_raw"
 
 GCS_BUCKET_NAME = "jmann-bucket1-rdw"
-GCS_BLOB_NAME = "raw/shopify/products/extract_date=2026-03-12/products.json"
+EXTRACT_DATE = datetime.now().strftime("%Y-%m-%d")
+GCS_BLOB_NAME = f"raw/shopify/products/extract_date={EXTRACT_DATE}/products.json"
 
 
 #“Go to GCS, download the raw JSON file, and give it back as Python data.”
@@ -34,7 +35,7 @@ def get_gcs_file_contents(bucket_name: str, blob_name: str) -> dict:
 
 #Take the Shopify products payload and turn it into BigQuery bronze rows with metadata.
 def build_bronze_rows(products_payload: dict, source_file_path: str) -> list[dict]:
-    extract_date = source_file_path.split("extract_date=")[1].split("/")[0] #extract date from file path(e.g "2026-03-13")
+    extract_date = source_file_path.split("extract_date=")[1].split("/")[0] #extract date from file path(e.g "2026-03-13"), get after extract_date, thats why [1], then split that on "/" and take the first part.
     ingested_at = datetime.utcnow().isoformat() #gives exact time the load script went at (e.g "2026-03-13T21:15:42.123456")
 
     rows = [] #holds bronze rows for BigQuery
