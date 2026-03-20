@@ -69,3 +69,22 @@ shopify_retail_dbt/
       silver/
       gold/
         marts/
+
+
+## Environments
+
+This project uses three Python environments:
+
+### 1. `venv`
+Used for:
+- Shopify extract scripts
+- BigQuery bronze load scripts
+
+### 2. `venv312`
+Used for:
+- dbt
+
+### 3. `airflow_venv`
+Used for:
+- Apache Airflow
+
