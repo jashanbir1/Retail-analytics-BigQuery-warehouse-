@@ -1,0 +1,10 @@
+venv
+venv312
+airflow_venv
+__pycache__
+*.pyc
+.git
+.gitignore
+logs
+shopify_retail_dbt/target
+shopify_retail_dbt/logs
