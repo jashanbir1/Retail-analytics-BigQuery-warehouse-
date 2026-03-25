@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass, asdict #used to create a clean result object for each quality check
+import time
+from dataclasses import dataclass, asdict  # used to create a clean result object for each quality check
 from datetime import datetime, timezone
-from typing import Any, Optional #type hints so code is easier to read
+from pathlib import Path
+from typing import Any, Optional  # type hints so code is easier to read
 
-from google.cloud import bigquery #BigQuery client: lets bigquery sql run queries,insert rows into a bigquery table
+import requests
+from google.cloud import bigquery  # BigQuery client: lets bigquery sql run queries, insert rows into a bigquery table
 
 
 PROJECT_ID = "retail-data-warehouse-project"
@@ -16,13 +20,43 @@ MONITORING_TABLE = "data_quality_results"
 
 
 """
+Loads .env values into os.environ so I do not have to manually export variables
+every time in terminal.
+
+This does not overwrite environment variables that are already set.
+"""
+def load_local_env(env_path: str = ".env") -> None:
+    env_file = Path(env_path)
+    if not env_file.exists():
+        return
+
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+load_local_env()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+
+
+"""
 What @dataclass is
 This is like a template for one row in the monitoring table.
 Each check I run will produce one CheckResult.
 For example:
-	•	bronze_orders_freshness_check
-	•	duplicate_order_id_check
-	•	gold_daily_sales_anomaly_check
+    • bronze_orders_freshness_check
+    • duplicate_order_id_check
+    • gold_daily_sales_anomaly_check
 
 It is basically saying:
 “Every quality check result should look like this.”
@@ -46,13 +80,16 @@ class CheckResult:
     likely_causes: Optional[str]
     suggested_actions: Optional[str]
 
-#returns current time
+
+# returns current time
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
-#returns BigQuery client through bigquery connection, me
+
+# returns BigQuery client through bigquery connection
 def get_bq_client() -> bigquery.Client:
     return bigquery.Client(project=PROJECT_ID)
+
 
 """
 What it does:
@@ -78,15 +115,16 @@ def run_scalar_query(client: bigquery.Client, query: str) -> Any:
     row = rows[0]
     return row[0]
 
+
 """
 What it does:
 Tries to convert a value into a float safely.
 
 Why this matters:
 BigQuery might return:
-	•	integers
-	•	decimals
-	•	None
+    • integers
+    • decimals
+    • None
 
 This function makes sure Python can work with the value as a number without crashing.
 """
@@ -98,18 +136,19 @@ def safe_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
 
+
 """
 What it does:
 Creates a CheckResult object in a clean, reusable way.
 
 Why it exists
 Every check returns a result with the same basic shape:
-	•	run id
-	•	check name
-	•	table
-	•	status
-	•	details
-	•	etc.
+    • run id
+    • check name
+    • table
+    • status
+    • details
+    • etc.
 
 This helper saves you from rewriting that object-building logic over and over.
 """
@@ -146,6 +185,7 @@ def build_result(
         suggested_actions=None,
     )
 
+
 """
 What this check is doing:
 It checks whether the latest extract_date in bronze orders equals today’s date.
@@ -165,9 +205,7 @@ def evaluate_freshness_check(
     today_utc = utc_now().date()
     status = "pass" if latest_extract_date == today_utc else "fail"
     severity = "high" if status == "fail" else "low"
-    details = (
-        f"Latest orders extract_date is {latest_extract_date}; expected {today_utc}."
-    )
+    details = f"Latest orders extract_date is {latest_extract_date}; expected {today_utc}."
 
     return build_result(
         run_id=run_id,
@@ -183,14 +221,15 @@ def evaluate_freshness_check(
         details=details,
     )
 
+
 """
 What this check is doing:
 It counts how many rows exist for the latest extract date in a given table.
 
 Works for:
-	•	orders raw
-	•	customers raw
-	•	products raw
+    • orders raw
+    • customers raw
+    • products raw
 """
 def evaluate_latest_extract_row_count_check(
     *,
@@ -243,13 +282,14 @@ def evaluate_latest_extract_row_count_check(
         details=details,
     )
 
+
 """
 What this check is doing:
 Looks for duplicate IDs.
 
 Example:
-	•	duplicate order_id
-	•	duplicate customer_id
+    • duplicate order_id
+    • duplicate customer_id
 """
 def evaluate_duplicate_check(
     *,
@@ -300,6 +340,7 @@ def evaluate_duplicate_check(
         details=details,
     )
 
+
 """
 What this check is doing
 
@@ -308,7 +349,6 @@ Compares the latest days revenue in gold_daily_sales against the trailing averag
 Big idea
 It asks:
 Is todays revenue abnormally low or high compared with recent history?
-
 """
 def evaluate_gold_daily_sales_anomaly(
     *,
@@ -347,8 +387,8 @@ def evaluate_gold_daily_sales_anomaly(
     latest_revenue = None
     trailing_avg = None
     if rows:
-      latest_revenue = safe_float(rows[0]["latest_revenue"])
-      trailing_avg = safe_float(rows[0]["trailing_avg"])
+        latest_revenue = safe_float(rows[0]["latest_revenue"])
+        trailing_avg = safe_float(rows[0]["trailing_avg"])
 
     if latest_revenue is None:
         status = "fail"
@@ -358,9 +398,7 @@ def evaluate_gold_daily_sales_anomaly(
     elif trailing_avg is None or trailing_avg == 0:
         status = "pass"
         severity = "low"
-        details = (
-            f"Latest revenue is {latest_revenue:.2f}. Not enough prior data to evaluate anomaly baseline."
-        )
+        details = f"Latest revenue is {latest_revenue:.2f}. Not enough prior data to evaluate anomaly baseline."
         metric_value = latest_revenue
     else:
         pct_change = ((latest_revenue - trailing_avg) / trailing_avg) * 100.0
@@ -369,7 +407,7 @@ def evaluate_gold_daily_sales_anomaly(
         if pct_change <= -50:
             status = "fail"
             severity = "high"
-        elif pct_change <= -30 or pct_change >= 50:
+        elif pct_change <= -30 or pct_change >= 20:
             status = "warn"
             severity = "medium"
         else:
@@ -389,11 +427,185 @@ def evaluate_gold_daily_sales_anomaly(
         table_name="gold_daily_sales",
         metric_name="pct_change_vs_trailing_7d_avg",
         metric_value=metric_value,
-        threshold_value="warn if <= -30% or >= 50%; fail if <= -50%",
+        threshold_value="warn if <= -30% or >= 20%; fail if <= -50%",
         status=status,
         severity=severity,
         details=details,
     )
+
+
+"""
+What this does:
+Builds the prompt that gets sent to GPT/OpenAI.
+
+Pass checks use local fallback text, so this prompt is mainly for warn/fail checks.
+"""
+def build_ai_prompt(result: CheckResult) -> str:
+    return f"""
+You are a data quality monitoring assistant for a retail data warehouse.
+
+A data quality check returned the following result:
+
+check_name: {result.check_name}
+layer_name: {result.layer_name}
+table_name: {result.table_name}
+metric_name: {result.metric_name}
+metric_value: {result.metric_value}
+threshold_value: {result.threshold_value}
+status: {result.status}
+severity: {result.severity}
+details: {result.details}
+
+Instructions:
+- Explain the result in an operational and concise tone.
+- For warn or fail results, describe the most likely causes.
+- Suggest the next checks or actions an engineer should take.
+- Be specific to the metric and threshold.
+- Keep each field short and practical.
+
+Respond in strict JSON with exactly these keys:
+{{
+  "severity": "...",
+  "ai_explanation": "...",
+  "likely_causes": "...",
+  "suggested_actions": "..."
+}}
+""".strip()
+
+
+"""
+What this does:
+Calls the OpenAI Responses API and returns parsed JSON fields.
+
+If no API key is set, it safely returns None values so the script still works.
+"""
+def call_openai_explanation(prompt: str) -> dict[str, Optional[str]]:
+    if not OPENAI_API_KEY:
+        return {
+            "severity": None,
+            "ai_explanation": None,
+            "likely_causes": None,
+            "suggested_actions": None,
+        }
+
+    max_attempts = 5
+    base_sleep_seconds = 2
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/responses",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OPENAI_MODEL,
+                    "input": prompt,
+                },
+                timeout=60,
+            )
+
+            # Retry on rate limit / temporary server issues
+            if response.status_code in {429, 500, 502, 503, 504}:
+                if attempt == max_attempts:
+                    response.raise_for_status()
+
+                wait_time = base_sleep_seconds * (2 ** (attempt - 1))
+                print(
+                    f"OpenAI retryable error {response.status_code}. "
+                    f"Attempt {attempt}/{max_attempts}. Waiting {wait_time} seconds..."
+                )
+                time.sleep(wait_time)
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+
+            output_text_parts = []
+            for item in data.get("output", []):
+                for content in item.get("content", []):
+                    if content.get("type") == "output_text":
+                        output_text_parts.append(content.get("text", ""))
+
+            output_text = "".join(output_text_parts).strip()
+            if not output_text:
+                raise RuntimeError("OpenAI returned no output text.")
+
+            parsed = json.loads(output_text)
+            return {
+                "severity": parsed.get("severity"),
+                "ai_explanation": parsed.get("ai_explanation"),
+                "likely_causes": parsed.get("likely_causes"),
+                "suggested_actions": parsed.get("suggested_actions"),
+            }
+
+        except requests.exceptions.RequestException as exc:
+            if attempt == max_attempts:
+                raise
+
+            wait_time = base_sleep_seconds * (2 ** (attempt - 1))
+            print(
+                f"OpenAI request failed: {exc}. "
+                f"Attempt {attempt}/{max_attempts}. Waiting {wait_time} seconds..."
+            )
+            time.sleep(wait_time)
+
+    raise RuntimeError("OpenAI explanation failed after all retry attempts.")
+
+
+"""
+What this does:
+Loops through every check result and enriches it with AI text.
+That means:
+    • ai_prompt
+    • ai_explanation
+    • likely_causes
+    • suggested_actions
+
+Pass checks use local fallback text so we do not waste API calls.
+Warn/fail checks use OpenAI.
+"""
+def enrich_results_with_ai(results: list[CheckResult]) -> list[CheckResult]:
+    for result in results:
+        # local explanation for healthy checks so we do not waste API calls
+        if result.status == "pass":
+            result.ai_prompt = None
+            result.ai_explanation = (
+                "Check passed. The observed metric is within the expected threshold "
+                "and does not currently indicate a data quality issue."
+            )
+            result.likely_causes = (
+                "Healthy pipeline behavior, expected source activity, and metric values "
+                "within configured tolerance."
+            )
+            result.suggested_actions = (
+                "No immediate action required. Continue monitoring future runs for trend changes."
+            )
+            continue
+
+        # only use OpenAI for warn/fail
+        prompt = build_ai_prompt(result)
+        result.ai_prompt = prompt
+
+        try:
+            ai_data = call_openai_explanation(prompt)
+            result.ai_explanation = ai_data.get("ai_explanation")
+            result.likely_causes = ai_data.get("likely_causes")
+            result.suggested_actions = ai_data.get("suggested_actions")
+
+            if ai_data.get("severity"):
+                result.severity = ai_data["severity"]
+
+        except Exception as exc:
+            result.ai_explanation = f"AI explanation failed: {exc}"
+            result.likely_causes = None
+            result.suggested_actions = (
+                "Check OPENAI_API_KEY, OPENAI_MODEL, rate limits, billing, and API response formatting."
+            )
+
+    return results
+
 
 """
 What it does:
@@ -501,13 +713,15 @@ def main() -> None:
         )
     )
 
+    results = enrich_results_with_ai(results)
     insert_results(client, results)
 
     print("Data quality checks completed successfully.")
     for result in results:
         print(
             f"{result.check_name}: status={result.status}, "
-            f"metric_value={result.metric_value}, details={result.details}"
+            f"metric_value={result.metric_value}, details={result.details}, "
+            f"ai_explanation={result.ai_explanation}"
         )
 
 
