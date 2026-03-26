@@ -11,11 +11,14 @@ DBT_PROFILES_DIR = "/home/airflow/.dbt"
 
 with DAG(
     dag_id="retail_warehouse_pipeline",
-    description="Extract Shopify data to GCS, load bronze tables in BigQuery, run dbt transformations, and run dbt tests.",
+    description=(
+        "Extract Shopify data to GCS, load bronze tables in BigQuery, "
+        "run dbt transformations, run dbt tests, and execute data quality checks."
+    ),
     start_date=datetime(2026, 3, 20),
     schedule=None,
     catchup=False,
-    tags=["retail", "shopify", "bigquery", "dbt"],
+    tags=["retail", "shopify", "bigquery", "dbt", "data-quality"],
 ) as dag:
 
     extract_products_to_gcs = BashOperator(
@@ -64,8 +67,18 @@ with DAG(
         ),
     )
 
+    run_data_quality_checks = BashOperator(
+        task_id="run_data_quality_checks",
+        bash_command=(
+            f"cd {REPO_ROOT} && "
+            f"python src/validation/run_data_quality_checks.py"
+        ),
+    )
+
+    # Extraction -> bronze loads
     extract_products_to_gcs >> load_products_bronze
     extract_customers_to_gcs >> load_customers_bronze
     extract_orders_to_gcs >> load_orders_bronze
 
-    [load_products_bronze, load_customers_bronze, load_orders_bronze] >> dbt_run >> dbt_test
+    # Bronze loads -> dbt -> data quality
+    [load_products_bronze, load_customers_bronze, load_orders_bronze] >> dbt_run >> dbt_test >> run_data_quality_checks
