@@ -58,7 +58,7 @@ networkx==3.6.1
 numpy==2.4.2
 oauthlib==3.3.1
 orderly-set==5.5.0
-packaging==26.0
+packaging==25.0
 pandas==2.3.3
 pandas-gbq==0.34.0
 parsedatetime==2.6
@@ -98,3 +98,5 @@ tzdata==2025.3
 urllib3==2.6.3
 websockets==16.0
 zipp==3.23.0
+streamlit==1.49.0
+plotly==6.3.0

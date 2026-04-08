@@ -165,6 +165,21 @@ services:
       - ./logs:/opt/airflow/logs
     command: airflow dag-processor
     restart: unless-stopped
+  
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: retail_streamlit
+    env_file:
+      - .env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/project/credentials/gcp-service-account.json
+    volumes:
+      - .:/opt/project
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
 
 volumes:
   airflow_postgres_data:
