@@ -12,14 +12,24 @@ DBT_PROFILES_DIR = "/home/airflow/.dbt"
 with DAG(
     dag_id="retail_warehouse_pipeline",
     description=(
-        "Extract Shopify data to GCS, load bronze tables in BigQuery, "
-        "run dbt transformations, run dbt tests, and execute data quality checks."
+        "Seed Shopify test data, extract Shopify data to GCS, load bronze tables "
+        "in BigQuery, run dbt transformations, run dbt tests, and execute data quality checks."
     ),
     start_date=datetime(2026, 3, 20),
     schedule=None,
     catchup=False,
     tags=["retail", "shopify", "bigquery", "dbt", "data-quality"],
 ) as dag:
+
+    seed_test_customers = BashOperator(
+        task_id="seed_test_customers",
+        bash_command=f"cd {REPO_ROOT} && python src/ingest/seed_test_customers.py",
+    )
+
+    seed_test_orders = BashOperator(
+        task_id="seed_test_orders",
+        bash_command=f"cd {REPO_ROOT} && python src/ingest/seed_test_orders.py",
+    )
 
     extract_products_to_gcs = BashOperator(
         task_id="extract_products_to_gcs",
@@ -74,6 +84,16 @@ with DAG(
             f"python src/validation/run_data_quality_checks.py"
         ),
     )
+
+    # Seed test data first
+    seed_test_customers >> seed_test_orders
+
+    # After seeding, extract current Shopify data
+    seed_test_orders >> [
+        extract_products_to_gcs,
+        extract_customers_to_gcs,
+        extract_orders_to_gcs,
+    ]
 
     # Extraction -> bronze loads
     extract_products_to_gcs >> load_products_bronze
