@@ -86,3 +86,10 @@ shopify_retail_dbt/
       gold/
         marts/
 
+```
+## Future optimizations
+
+Natural Language → SQL Layer Add a chat interface where a business user can ask "what were my top 10 products last month by margin?" and the agent writes and runs the BigQuery SQL, then narrates the result. Making working with the data conversational and querying through data intuitive for non-technical and technical stakeholders
+
+
+
