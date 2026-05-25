@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import anthropic
 import pandas as pd
 import streamlit as st
 from google.cloud import bigquery
@@ -32,6 +33,208 @@ def load_local_env(env_path: str = ".env") -> None:
 
 
 load_local_env()
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+_WAREHOUSE_SCHEMA = """
+You are a data analyst assistant for a Shopify retail data warehouse on Google BigQuery
+(project: retail-data-warehouse-project).
+
+Always fully qualify table names with backticks:
+  `retail-data-warehouse-project.retail_gold.gold_daily_sales`
+
+Limit results to 100 rows unless the user asks for more.
+All revenue values are floats in the store's currency (typically USD).
+
+=== AVAILABLE TABLES ===
+
+retail_gold.gold_daily_sales
+  order_date        DATE      – calendar date of orders
+  total_orders      INTEGER   – distinct orders placed
+  total_units_sold  INTEGER   – total quantity of items sold
+  total_revenue     FLOAT     – sum of line revenues
+
+retail_gold.gold_customer_lifetime_value
+  customer_id           STRING
+  customer_full_name    STRING
+  email                 STRING
+  phone_number          STRING
+  currency              STRING
+  total_orders          INTEGER
+  total_units_purchased INTEGER
+  lifetime_revenue      FLOAT
+  average_order_value   FLOAT
+
+retail_gold.gold_product_sales
+  product_id            STRING
+  product_title         STRING
+  vendor                STRING
+  total_orders          INTEGER
+  total_units_sold      INTEGER
+  all_time_revenue      FLOAT
+  avg_revenue_per_order FLOAT
+  avg_units_per_order   FLOAT
+
+retail_gold.gold_order_basket_behavior  (one row per order)
+  order_id              STRING
+  customer_id           STRING
+  order_date            DATE
+  line_item_count       INTEGER  – distinct products in the order
+  total_units_in_order  INTEGER
+  order_revenue         FLOAT
+  fulfillment_status    STRING   – 'fulfilled', 'unfulfilled', etc.
+  is_fulfilled          BOOLEAN
+
+retail_gold.fact_order_line_items  (one row per line item)
+  line_item_id       STRING
+  order_id           STRING
+  customer_id        STRING
+  product_id         STRING
+  variant_id         STRING
+  order_date         DATE
+  quantity           INTEGER
+  unit_price         FLOAT
+  line_revenue       FLOAT    – quantity * unit_price
+  fulfillment_status STRING
+  requires_shipping  BOOLEAN
+  taxable            BOOLEAN
+
+retail_gold.dim_customers
+  customer_id          STRING
+  first_name           STRING
+  last_name            STRING
+  customer_full_name   STRING
+  email                STRING
+  phone_number         STRING
+  customer_state       STRING
+  verified_email       BOOLEAN
+  tax_exempt           BOOLEAN
+  tags                 STRING
+  currency             STRING
+  customer_created_at  TIMESTAMP
+  customer_updated_at  TIMESTAMP
+
+retail_gold.dim_products
+  product_id    STRING
+  product_title STRING
+  vendor        STRING
+
+retail_monitoring.data_quality_results
+  run_id           STRING
+  run_timestamp    TIMESTAMP
+  check_name       STRING
+  layer_name       STRING   – 'bronze' or 'gold'
+  table_name       STRING
+  metric_name      STRING
+  metric_value     FLOAT
+  threshold_value  STRING
+  status           STRING   – 'pass', 'warn', 'fail'
+  severity         STRING   – 'low', 'medium', 'high'
+  details          STRING
+  ai_explanation   STRING
+  likely_causes    STRING
+  suggested_actions STRING
+""".strip()
+
+_RUN_SQL_TOOL = {
+    "name": "run_bigquery_sql",
+    "description": (
+        "Execute a SQL query against the retail BigQuery warehouse and return results. "
+        "Use this whenever you need data to answer the user's question."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sql": {
+                "type": "string",
+                "description": "A valid BigQuery SQL query with fully-qualified, backtick-quoted table names.",
+            }
+        },
+        "required": ["sql"],
+    },
+}
+
+
+def _run_nl_sql_agent(
+    question: str, bq_client: bigquery.Client
+) -> tuple[str, str | None, pd.DataFrame | None]:
+    """Run the observe-reason-act loop: Claude generates SQL, we execute it, Claude answers."""
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your-anthropic-api-key-here":
+        return (
+            "Set ANTHROPIC_API_KEY in your .env file to enable the chat feature.",
+            None,
+            None,
+        )
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    messages: list[dict] = [{"role": "user", "content": question}]
+    generated_sql: str | None = None
+    result_df: pd.DataFrame | None = None
+
+    while True:
+        response = client.messages.create(
+            model="claude-opus-4-7",
+            max_tokens=4096,
+            system=[
+                {
+                    "type": "text",
+                    "text": _WAREHOUSE_SCHEMA,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            tools=[_RUN_SQL_TOOL],
+            messages=messages,
+        )
+
+        if response.stop_reason == "end_turn":
+            answer = next(
+                (b.text for b in response.content if b.type == "text"), "Done."
+            )
+            return answer, generated_sql, result_df
+
+        if response.stop_reason == "tool_use":
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+
+            for block in response.content:
+                if block.type != "tool_use" or block.name != "run_bigquery_sql":
+                    continue
+                sql: str = block.input["sql"]
+                generated_sql = sql
+                try:
+                    result_df = bq_client.query(sql).to_dataframe()
+                    result_str = (
+                        "Query returned no rows."
+                        if result_df.empty
+                        else result_df.head(100).to_string(index=False)
+                    )
+                except Exception as exc:
+                    result_df = None
+                    result_str = f"SQL Error: {exc}"
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result_str,
+                            "is_error": True,
+                        }
+                    )
+                    continue
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_str,
+                    }
+                )
+
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            answer = next(
+                (b.text for b in response.content if b.type == "text"),
+                "Unexpected response.",
+            )
+            return answer, generated_sql, result_df
 
 
 @st.cache_resource
@@ -288,3 +491,45 @@ with detail_col2:
 
 with st.expander("Show AI Prompt"):
     st.code(selected_check_row["ai_prompt"] or "No AI prompt stored for this check.")
+
+st.divider()
+
+st.subheader("Ask Your Data")
+st.caption(
+    "Ask any question about your retail data in plain English. "
+    "Claude will write and run the SQL for you."
+)
+
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+
+for msg in st.session_state.chat_messages:
+    with st.chat_message(msg["role"]):
+        if msg["role"] == "assistant":
+            if msg.get("sql"):
+                with st.expander("Generated SQL", expanded=False):
+                    st.code(msg["sql"], language="sql")
+            if msg.get("df") is not None and not msg["df"].empty:
+                st.dataframe(msg["df"], use_container_width=True, hide_index=True)
+        st.write(msg["content"])
+
+if question := st.chat_input("e.g. What were my top 5 products by revenue last month?"):
+    st.session_state.chat_messages.append({"role": "user", "content": question})
+
+    with st.chat_message("user"):
+        st.write(question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Querying your warehouse..."):
+            answer, sql, df = _run_nl_sql_agent(question, get_bq_client())
+
+        if sql:
+            with st.expander("Generated SQL", expanded=False):
+                st.code(sql, language="sql")
+        if df is not None and not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.write(answer)
+
+    st.session_state.chat_messages.append(
+        {"role": "assistant", "content": answer, "sql": sql, "df": df}
+    )
