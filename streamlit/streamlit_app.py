@@ -496,8 +496,8 @@ st.divider()
 
 st.subheader("Ask Your Data")
 st.caption(
-    "Ask any question about your retail data in plain English. "
-    "Claude will write and run the SQL for you."
+    "Hi I am Enzo! Ask any question about your retail data in plain English. "
+    "I will write and run the query for you."
 )
 
 if "chat_messages" not in st.session_state:
@@ -513,7 +513,7 @@ for msg in st.session_state.chat_messages:
                 st.dataframe(msg["df"], use_container_width=True, hide_index=True)
         st.write(msg["content"])
 
-if question := st.chat_input("e.g. What were my top 5 products by revenue last month?"):
+if question := st.chat_input("What would you like to know?"):
     st.session_state.chat_messages.append({"role": "user", "content": question})
 
     with st.chat_message("user"):
