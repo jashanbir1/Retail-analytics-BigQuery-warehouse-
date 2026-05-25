@@ -1,12 +1,12 @@
+import json
 import os
-import json #read and write json
-from datetime import datetime #for creating load timestamp
-from pathlib import Path ##helps locate files like .env and credentials
+from datetime import date, datetime
+from pathlib import Path
 
-from dotenv import load_dotenv #load values from .env
-from google.api_core.exceptions import Conflict #used to catch table exists already
-from google.cloud import bigquery #talks to bigquery
-from google.cloud import storage #talks to GCS
+from dotenv import load_dotenv
+from google.api_core.exceptions import Conflict
+from google.cloud import bigquery
+from google.cloud import storage
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
@@ -18,53 +18,57 @@ BRONZE_DATASET = "retail_bronze"
 BRONZE_TABLE = "shopify_products_raw"
 
 GCS_BUCKET_NAME = "jmann-bucket1-rdw"
-EXTRACT_DATE = datetime.now().strftime("%Y-%m-%d")
-GCS_BLOB_NAME = f"raw/shopify/products/extract_date={EXTRACT_DATE}/products.json"
+GCS_PREFIX = "raw/shopify/products/"
 
 
-#“Go to GCS, download the raw JSON file, and give it back as Python data.”
+def list_gcs_partition_blobs(bucket_name: str, prefix: str) -> list[str]:
+    storage_client = storage.Client()
+    blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
+    return [blob.name for blob in blobs if blob.name.endswith(".json")]
+
+
+def get_loaded_extract_dates(client: bigquery.Client, table_id: str) -> set[str]:
+    try:
+        rows = client.query(
+            f"SELECT DISTINCT CAST(extract_date AS STRING) AS extract_date FROM `{table_id}`"
+        ).result()
+        return {row.extract_date for row in rows}
+    except Exception:
+        return set()
+
+
+def delete_partition(client: bigquery.Client, table_id: str, extract_date: str) -> None:
+    client.query(
+        f"DELETE FROM `{table_id}` WHERE CAST(extract_date AS STRING) = '{extract_date}'"
+    ).result()
+    print(f"  Deleted existing rows for extract_date={extract_date}")
+
+
 def get_gcs_file_contents(bucket_name: str, blob_name: str) -> dict:
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GOOGLE_APPLICATION_CREDENTIALS) #instills the environment
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    return json.loads(blob.download_as_text())
 
-    storage_client = storage.Client() #get client account info from gcs bucket, creates connection to gcs 
-    bucket = storage_client.bucket(bucket_name) #gets gcs bucket jmann-bucket1-rdw
-    blob = bucket.blob(blob_name) #blob name points to file in bucket
 
-    file_contents = blob.download_as_text() #download the file in the blob as text. At this point, file_contents is a string like: {"products": [...]}
-    return json.loads(file_contents) #convert it to json (python data)
-
-#Take the Shopify products payload and turn it into BigQuery bronze rows with metadata.
 def build_bronze_rows(products_payload: dict, source_file_path: str) -> list[dict]:
-    extract_date = source_file_path.split("extract_date=")[1].split("/")[0] #extract date from file path(e.g "2026-03-13"), get after extract_date, thats why [1], then split that on "/" and take the first part.
-    ingested_at = datetime.utcnow().isoformat() #gives exact time the load script went at (e.g "2026-03-13T21:15:42.123456")
-
-    rows = [] #holds bronze rows for BigQuery
-
-    for product in products_payload.get("products", []): #grabs list under products and loops through each one, if products is empty it uses an empty list instead of crashing 
+    extract_date = source_file_path.split("extract_date=")[1].split("/")[0]
+    ingested_at = datetime.utcnow().isoformat()
+    rows = []
+    for product in products_payload.get("products", []):
         rows.append(
             {
                 "product_id": str(product["id"]),
                 "extract_date": extract_date,
                 "ingested_at": ingested_at,
                 "source_file_path": source_file_path,
-                "raw_payload": json.dumps(product), #BigQuery is storing the full original product JSON as a string.
+                "raw_payload": json.dumps(product),
             }
         )
+    return rows
 
-    return rows #return a python list of dictionairies
 
-#Make bronze table if it doesnt exist already
 def create_table_if_not_exists(client: bigquery.Client, table_id: str) -> None:
-    """
-    Define schema:
-    This defines the table columns and types.
-    product_id → string
-    extract_date → date
-    ingested_at → timestamp
-    source_file_path → string
-    raw_payload → string
-    """
-
     schema = [
         bigquery.SchemaField("product_id", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("extract_date", "DATE", mode="REQUIRED"),
@@ -72,17 +76,15 @@ def create_table_if_not_exists(client: bigquery.Client, table_id: str) -> None:
         bigquery.SchemaField("source_file_path", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("raw_payload", "STRING", mode="REQUIRED"),
     ]
-
-    table = bigquery.Table(table_id, schema=schema) #builds table object in python, does not create it in bigquery yet, only defines what the table should look like
-
+    table = bigquery.Table(table_id, schema=schema)
     try:
-        client.create_table(table) #sends the create-table request to BigQuery.
+        client.create_table(table)
         print(f"Created table: {table_id}")
     except Conflict:
-        print(f"Table already exists: {table_id}") #If the table already exists, the script does not fail, It just prints a message and continues.
+        print(f"Table already exists: {table_id}")
 
 
-def load_rows_into_bigquery(client: bigquery.Client, table_id: str, rows: list[dict]):
+def append_rows_to_bigquery(client: bigquery.Client, table_id: str, rows: list[dict]) -> None:
     schema = [
         bigquery.SchemaField("product_id", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("extract_date", "DATE", mode="REQUIRED"),
@@ -90,46 +92,55 @@ def load_rows_into_bigquery(client: bigquery.Client, table_id: str, rows: list[d
         bigquery.SchemaField("source_file_path", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("raw_payload", "STRING", mode="REQUIRED"),
     ]
-
     job_config = bigquery.LoadJobConfig(
         schema=schema,
-        write_disposition="WRITE_TRUNCATE",
+        write_disposition="WRITE_APPEND",
     )
-
-    job = client.load_table_from_json(
-        rows,
-        table_id,
-        job_config=job_config,
-    )
-
+    job = client.load_table_from_json(rows, table_id, job_config=job_config)
     job.result()
-
-    print(f"Load successful: {len(rows)} products loaded into {table_id}")
+    print(f"Appended {len(rows)} products into {table_id}")
 
 
 def main() -> None:
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GOOGLE_APPLICATION_CREDENTIALS) #set up environment
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GOOGLE_APPLICATION_CREDENTIALS)
 
-    bq_client = bigquery.Client(project=PROJECT_ID) #connect python to my BigQuery account
+    bq_client = bigquery.Client(project=PROJECT_ID)
+    table_id = f"{PROJECT_ID}.{BRONZE_DATASET}.{BRONZE_TABLE}"
+    today = date.today().isoformat()
 
-    table_id = f"{PROJECT_ID}.{BRONZE_DATASET}.{BRONZE_TABLE}" #create a table id to insert data
-    source_file_path = f"gs://{GCS_BUCKET_NAME}/{GCS_BLOB_NAME}" #file path of where the source data is 
+    create_table_if_not_exists(bq_client, table_id)
 
-    print("Reading raw products file from GCS...")
-    products_payload = get_gcs_file_contents(GCS_BUCKET_NAME, GCS_BLOB_NAME) #get payload data using get_gcs_file_contents passing in the bucket name and blob name 
+    already_loaded = get_loaded_extract_dates(bq_client, table_id)
+    print(f"Already loaded extract dates: {sorted(already_loaded)}")
 
-    print("Building bronze rows...")
-    bronze_rows = build_bronze_rows(products_payload, source_file_path) #build bronze rows returning rows list of dictionairies using payload data and where the source data is 
+    blob_names = list_gcs_partition_blobs(GCS_BUCKET_NAME, GCS_PREFIX)
 
-    if not bronze_rows:
-        raise RuntimeError("No product rows found in source payload.") #if raw file has no products just fail early 
+    blobs_to_load = []
+    for blob_name in blob_names:
+        partition_date = blob_name.split("extract_date=")[1].split("/")[0]
+        if partition_date == today:
+            if partition_date in already_loaded:
+                delete_partition(bq_client, table_id, partition_date)
+            blobs_to_load.append(blob_name)
+        elif partition_date not in already_loaded:
+            blobs_to_load.append(blob_name)
+        else:
+            print(f"  Skipping {partition_date} (already loaded)")
 
-    print("Creating bronze table if needed...")
-    create_table_if_not_exists(bq_client, table_id) #pass in client connector and the table id and create a bronze table
+    if not blobs_to_load:
+        print("No new partitions to load. Bronze is up to date.")
+        return
 
-    print("Loading rows into BigQuery...")
-    load_rows_into_bigquery(bq_client, table_id, bronze_rows) #load rows into created bronze table
+    print(f"Loading: {blobs_to_load}")
+    all_rows = []
+    for blob_name in blobs_to_load:
+        source_file_path = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+        payload = get_gcs_file_contents(GCS_BUCKET_NAME, blob_name)
+        rows = build_bronze_rows(payload, source_file_path)
+        all_rows.extend(rows)
+        print(f"  {blob_name}: {len(rows)} products")
 
+    append_rows_to_bigquery(bq_client, table_id, all_rows)
     print("Bronze load complete.")
 
 

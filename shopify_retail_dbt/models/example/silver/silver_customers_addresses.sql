@@ -17,7 +17,38 @@ addresses_cte AS (
         source_file_path,
         address
     FROM bronze_customers_cte,
-    UNNEST(JSON_QUERY_ARRAY(raw_payload, '$.addresses')) as address
+    UNNEST(JSON_QUERY_ARRAY(raw_payload, '$.addresses')) AS address
+),
+ranked AS (
+    SELECT
+        customer_id,
+        extract_date,
+        ingested_at,
+        source_file_path,
+
+        JSON_VALUE(address, '$.id') AS address_id,
+        JSON_VALUE(address, '$.first_name') AS first_name,
+        JSON_VALUE(address, '$.last_name') AS last_name,
+        JSON_VALUE(address, '$.company') AS company,
+        JSON_VALUE(address, '$.address1') AS address1,
+        JSON_VALUE(address, '$.address2') AS address2,
+        JSON_VALUE(address, '$.city') AS city,
+        JSON_VALUE(address, '$.province') AS province,
+        JSON_VALUE(address, '$.country') AS country,
+        JSON_VALUE(address, '$.zip') AS zip,
+        JSON_VALUE(address, '$.phone') AS phone,
+        JSON_VALUE(address, '$.name') AS full_name,
+        JSON_VALUE(address, '$.province_code') AS province_code,
+        JSON_VALUE(address, '$.country_code') AS country_code,
+        JSON_VALUE(address, '$.country_name') AS country_name,
+        CAST(JSON_VALUE(address, '$.default') AS BOOL) AS is_default_address,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY JSON_VALUE(address, '$.id')
+            ORDER BY extract_date DESC
+        ) AS rn
+
+    FROM addresses_cte
 )
 
 SELECT
@@ -25,22 +56,22 @@ SELECT
     extract_date,
     ingested_at,
     source_file_path,
+    address_id,
+    first_name,
+    last_name,
+    company,
+    address1,
+    address2,
+    city,
+    province,
+    country,
+    zip,
+    phone,
+    full_name,
+    province_code,
+    country_code,
+    country_name,
+    is_default_address
 
-    JSON_VALUE(address, '$.id') AS address_id,
-    JSON_VALUE(address, '$.first_name') AS first_name,
-    JSON_VALUE(address, '$.last_name') AS last_name,
-    JSON_VALUE(address, '$.company') AS company,
-    JSON_VALUE(address, '$.address1') AS address1,
-    JSON_VALUE(address, '$.address2') AS address2,
-    JSON_VALUE(address, '$.city') AS city,
-    JSON_VALUE(address, '$.province') AS province,
-    JSON_VALUE(address, '$.country') AS country,
-    JSON_VALUE(address, '$.zip') AS zip,
-    JSON_VALUE(address, '$.phone') AS phone,
-    JSON_VALUE(address, '$.name') AS full_name,
-    JSON_VALUE(address, '$.province_code') AS province_code,
-    JSON_VALUE(address, '$.country_code') AS country_code,
-    JSON_VALUE(address, '$.country_name') AS country_name,
-    CAST(JSON_VALUE(address, '$.default') AS BOOL) AS is_default_address
-
-FROM addresses_cte
+FROM ranked
+WHERE rn = 1

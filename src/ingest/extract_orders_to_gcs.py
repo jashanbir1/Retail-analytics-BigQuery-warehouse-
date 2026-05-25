@@ -18,7 +18,7 @@ GCS_BUCKET_NAME = "jmann-bucket1-rdw"
 
 GOOGLE_APPLICATION_CREDENTIALS = PROJECT_ROOT / "credentials" / "gcp-service-account.json"
 
-SHOPIFY_ORDERS_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/api/2026-01/orders.json?limit=250&status=any"
+SHOPIFY_ORDERS_BASE_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/api/2026-01/orders.json"
 
 
 def validate_env() -> None:
@@ -45,20 +45,36 @@ def fetch_orders_from_shopify(access_token: str) -> dict:
         "Content-Type": "application/json",
     }
 
-    response = requests.get(
-        SHOPIFY_ORDERS_URL,
-        headers=headers,
-        timeout=30,
-    )
+    all_orders = []
+    url = f"{SHOPIFY_ORDERS_BASE_URL}?limit=250&status=any"
 
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Shopify orders request failed.\n"
-            f"Status: {response.status_code}\n"
-            f"Response: {response.text}"
-        )
+    while url:
+        response = requests.get(url, headers=headers, timeout=30)
 
-    return response.json()
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Shopify orders request failed.\n"
+                f"Status: {response.status_code}\n"
+                f"Response: {response.text}"
+            )
+
+        page_orders = response.json().get("orders", [])
+        all_orders.extend(page_orders)
+        print(f"Fetched {len(page_orders)} orders (total so far: {len(all_orders)})")
+
+        link_header = response.headers.get("Link", "")
+        url = _parse_next_link(link_header)
+
+    return {"orders": all_orders}
+
+
+def _parse_next_link(link_header: str) -> str | None:
+    """Extract the 'next' cursor URL from Shopify's Link header."""
+    for part in link_header.split(","):
+        part = part.strip()
+        if 'rel="next"' in part:
+            return part.split(";")[0].strip().strip("<>")
+    return None
 
 
 def upload_json_to_gcs(bucket_name: str, blob_name: str, payload: dict) -> None:

@@ -1,6 +1,6 @@
-import os
 import json
-from datetime import datetime, UTC
+import os
+from datetime import date, datetime, UTC
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,28 +18,43 @@ BRONZE_DATASET = "retail_bronze"
 BRONZE_TABLE = "shopify_customers_raw"
 
 GCS_BUCKET_NAME = "jmann-bucket1-rdw"
-EXTRACT_DATE = datetime.now().strftime("%Y-%m-%d")
-GCS_BLOB_NAME = f"raw/shopify/customers/extract_date={EXTRACT_DATE}/customers.json"
+GCS_PREFIX = "raw/shopify/customers/"
 
-#extract raw contents from gcs raw landing zone
-def get_gcs_file_contents(bucket_name: str, blob_name: str):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GOOGLE_APPLICATION_CREDENTIALS)
 
+def list_gcs_partition_blobs(bucket_name: str, prefix: str) -> list[str]:
+    storage_client = storage.Client()
+    blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
+    return [blob.name for blob in blobs if blob.name.endswith(".json")]
+
+
+def get_loaded_extract_dates(client: bigquery.Client, table_id: str) -> set[str]:
+    try:
+        rows = client.query(
+            f"SELECT DISTINCT CAST(extract_date AS STRING) AS extract_date FROM `{table_id}`"
+        ).result()
+        return {row.extract_date for row in rows}
+    except Exception:
+        return set()
+
+
+def delete_partition(client: bigquery.Client, table_id: str, extract_date: str) -> None:
+    client.query(
+        f"DELETE FROM `{table_id}` WHERE CAST(extract_date AS STRING) = '{extract_date}'"
+    ).result()
+    print(f"  Deleted existing rows for extract_date={extract_date}")
+
+
+def get_gcs_file_contents(bucket_name: str, blob_name: str) -> dict:
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
+    return json.loads(blob.download_as_text())
 
-    file_contents = blob.download_as_text()
-    json_contents = json.loads(file_contents)
-    print("File contents retrieved")
-    return json_contents
-#build rows in uploadable format to BigQuery
-def build_bronze_rows(customers_payload: dict, source_file_path: str):
+
+def build_bronze_rows(customers_payload: dict, source_file_path: str) -> list[dict]:
     extract_date = source_file_path.split("extract_date=")[1].split("/")[0]
     ingested_at = datetime.now(UTC).isoformat()
-
     rows = []
-
     for customer in customers_payload.get("customers", []):
         rows.append(
             {
@@ -47,15 +62,13 @@ def build_bronze_rows(customers_payload: dict, source_file_path: str):
                 "extract_date": extract_date,
                 "ingested_at": ingested_at,
                 "source_file_path": source_file_path,
-                "raw_payload": json.dumps(customer)
+                "raw_payload": json.dumps(customer),
             }
         )
-    
     return rows
 
-#Create customers table in BigQuery if it doesnt exist 
-def create_table_if_not_exists(client: bigquery.Client, table_id: str):
-     
+
+def create_table_if_not_exists(client: bigquery.Client, table_id: str) -> None:
     schema = [
         bigquery.SchemaField("customer_id", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("extract_date", "DATE", mode="REQUIRED"),
@@ -63,17 +76,15 @@ def create_table_if_not_exists(client: bigquery.Client, table_id: str):
         bigquery.SchemaField("source_file_path", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("raw_payload", "STRING", mode="REQUIRED"),
     ]
-    
     table = bigquery.Table(table_id, schema=schema)
-
     try:
         client.create_table(table)
         print(f"Created table: {table_id}")
     except Conflict:
         print(f"Table already exists: {table_id}")
 
-#truncates table first then load data into rows
-def load_rows_into_bigquery(client: bigquery.Client, table_id: str, rows: list[dict]):
+
+def append_rows_to_bigquery(client: bigquery.Client, table_id: str, rows: list[dict]) -> None:
     schema = [
         bigquery.SchemaField("customer_id", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("extract_date", "DATE", mode="REQUIRED"),
@@ -81,52 +92,57 @@ def load_rows_into_bigquery(client: bigquery.Client, table_id: str, rows: list[d
         bigquery.SchemaField("source_file_path", "STRING", mode="REQUIRED"),
         bigquery.SchemaField("raw_payload", "STRING", mode="REQUIRED"),
     ]
-
     job_config = bigquery.LoadJobConfig(
         schema=schema,
-        write_disposition="WRITE_TRUNCATE",
+        write_disposition="WRITE_APPEND",
     )
-
-    job = client.load_table_from_json(
-        rows,
-        table_id,
-        job_config=job_config,
-    )
-
+    job = client.load_table_from_json(rows, table_id, job_config=job_config)
     job.result()
+    print(f"Appended {len(rows)} customers into {table_id}")
 
-    print(f"Load successful: {len(rows)} customers loaded into {table_id}")
 
-#run program
-def main():
+def main() -> None:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GOOGLE_APPLICATION_CREDENTIALS)
 
     bq_client = bigquery.Client(project=PROJECT_ID)
-
     table_id = f"{PROJECT_ID}.{BRONZE_DATASET}.{BRONZE_TABLE}"
-    source_file_path = f"gs://{GCS_BUCKET_NAME}/{GCS_BLOB_NAME}"
+    today = date.today().isoformat()
 
-    print("Reading raw file contents...")
-    customer_payload = get_gcs_file_contents(GCS_BUCKET_NAME, GCS_BLOB_NAME)
+    create_table_if_not_exists(bq_client, table_id)
 
-    print("Building bronze rows...")
-    customer_rows = build_bronze_rows(customer_payload, source_file_path)
+    already_loaded = get_loaded_extract_dates(bq_client, table_id)
+    print(f"Already loaded extract dates: {sorted(already_loaded)}")
 
-    if not customer_rows:
-        raise RuntimeError("No customer rows found in source payload")
+    blob_names = list_gcs_partition_blobs(GCS_BUCKET_NAME, GCS_PREFIX)
 
-    print("Creating bronze table if needed...")
-    create_table_if_not_exists(bq_client,table_id)
+    blobs_to_load = []
+    for blob_name in blob_names:
+        partition_date = blob_name.split("extract_date=")[1].split("/")[0]
+        if partition_date == today:
+            if partition_date in already_loaded:
+                delete_partition(bq_client, table_id, partition_date)
+            blobs_to_load.append(blob_name)
+        elif partition_date not in already_loaded:
+            blobs_to_load.append(blob_name)
+        else:
+            print(f"  Skipping {partition_date} (already loaded)")
 
-    print("Loading rows into bronze...")
-    load_rows_into_bigquery(bq_client, table_id, customer_rows)
+    if not blobs_to_load:
+        print("No new partitions to load. Bronze is up to date.")
+        return
 
-    print("Bronze rows uploaded for customers in BigQuery")
+    print(f"Loading: {blobs_to_load}")
+    all_rows = []
+    for blob_name in blobs_to_load:
+        source_file_path = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+        payload = get_gcs_file_contents(GCS_BUCKET_NAME, blob_name)
+        rows = build_bronze_rows(payload, source_file_path)
+        all_rows.extend(rows)
+        print(f"  {blob_name}: {len(rows)} customers")
+
+    append_rows_to_bigquery(bq_client, table_id, all_rows)
+    print("Bronze load complete.")
 
 
 if __name__ == "__main__":
     main()
-    
-
-
-

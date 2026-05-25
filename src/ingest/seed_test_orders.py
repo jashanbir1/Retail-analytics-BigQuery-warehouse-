@@ -1,6 +1,7 @@
 import os
 import random
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -137,7 +138,17 @@ def pick_order_tags() -> str | None:
     return ", ".join(selected)
 
 
-def build_order_payload(customer: dict, variant_pool: list[dict]) -> dict:
+def random_historical_timestamp(months_back: int = 12) -> str:
+    """Random UTC timestamp within the past `months_back` months, weighted toward older dates."""
+    now = datetime.now(tz=timezone.utc)
+    start = now - timedelta(days=months_back * 30)
+    delta_seconds = int((now - start).total_seconds())
+    random_offset = random.randint(0, delta_seconds)
+    ts = start + timedelta(seconds=random_offset)
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_order_payload(customer: dict, variant_pool: list[dict], created_at: str) -> dict:
     num_variants = min(random.randint(1, 4), len(variant_pool))
     selected_variants = random.sample(variant_pool, k=num_variants)
 
@@ -165,6 +176,8 @@ def build_order_payload(customer: dict, variant_pool: list[dict]) -> dict:
             "send_receipt": False,
             "send_fulfillment_receipt": False,
             "inventory_behaviour": "decrement_ignoring_policy",
+            "created_at": created_at,
+            "processed_at": created_at,
         }
     }
 
@@ -217,12 +230,13 @@ def main() -> None:
     if not variant_pool:
         raise RuntimeError("No usable product variants found for order seeding.")
 
-    target_count = 5
+    target_count = 150
     created = 0
 
     for i in range(target_count):
         customer = random.choice(customers)
-        order_payload = build_order_payload(customer, variant_pool)
+        created_at = random_historical_timestamp(months_back=12)
+        order_payload = build_order_payload(customer, variant_pool, created_at)
 
         try:
             order = create_order(access_token, order_payload)
@@ -232,16 +246,14 @@ def main() -> None:
 
         created += 1
         print(
-            f"Created order {created}: "
+            f"Created order {created}/{target_count}: "
             f"order_id={order['id']} "
-            f"order_name={order.get('name')} "
-            f"customer_id={customer['id']} "
-            f"financial_status={order.get('financial_status')} "
-            f"fulfillment_status={order.get('fulfillment_status')}"
+            f"created_at={created_at} "
+            f"financial_status={order.get('financial_status')}"
         )
 
         if i < target_count - 1:
-            time.sleep(10)
+            time.sleep(1)
 
     print(f"Finished. Orders created: {created}")
 
