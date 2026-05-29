@@ -302,11 +302,14 @@ def evaluate_duplicate_check(
     layer_name: str,
     check_name: str,
 ) -> CheckResult:
+    # Scope to today's partition only — cross-partition duplicates are expected
+    # since the same entity appears in multiple historical extract_date partitions.
     query = f"""
     SELECT COUNT(*)
     FROM (
       SELECT {id_column}
       FROM `{PROJECT_ID}.{dataset}.{table_name}`
+      WHERE CAST(extract_date AS STRING) = CAST(CURRENT_DATE() AS STRING)
       GROUP BY {id_column}
       HAVING COUNT(*) > 1
     )

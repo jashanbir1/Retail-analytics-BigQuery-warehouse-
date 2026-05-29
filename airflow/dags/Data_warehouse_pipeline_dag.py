@@ -83,6 +83,24 @@ with DAG(
         **BQ_RETRY_ARGS,
     )
 
+    check_bronze_orders = BashOperator(
+        task_id="check_bronze_orders",
+        bash_command=f"cd {REPO_ROOT} && python src/validation/run_bronze_checks.py --entity orders",
+        **BQ_RETRY_ARGS,
+    )
+
+    check_bronze_customers = BashOperator(
+        task_id="check_bronze_customers",
+        bash_command=f"cd {REPO_ROOT} && python src/validation/run_bronze_checks.py --entity customers",
+        **BQ_RETRY_ARGS,
+    )
+
+    check_bronze_products = BashOperator(
+        task_id="check_bronze_products",
+        bash_command=f"cd {REPO_ROOT} && python src/validation/run_bronze_checks.py --entity products",
+        **BQ_RETRY_ARGS,
+    )
+
     dbt_run = BashOperator(
         task_id="dbt_run",
         bash_command=(
@@ -125,5 +143,8 @@ with DAG(
     extract_customers_to_gcs >> load_customers_bronze
     extract_orders_to_gcs >> load_orders_bronze
 
-    # Bronze loads -> dbt -> data quality
-    [load_products_bronze, load_customers_bronze, load_orders_bronze] >> dbt_run >> dbt_test >> run_data_quality_checks
+    # Bronze loads -> bronze checks (each load feeds its own check) -> dbt -> data quality
+    load_orders_bronze >> check_bronze_orders
+    load_customers_bronze >> check_bronze_customers
+    load_products_bronze >> check_bronze_products
+    [check_bronze_orders, check_bronze_customers, check_bronze_products] >> dbt_run >> dbt_test >> run_data_quality_checks

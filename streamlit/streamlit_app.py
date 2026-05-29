@@ -423,6 +423,12 @@ with right:
 
 st.divider()
 
+LAYER_BADGE = {
+    "bronze": "🟤 Bronze",
+    "silver": "⚪ Silver",
+    "gold":   "🟡 Gold",
+}
+
 issues_df = run_df[run_df["status"].isin(["warn", "fail"])].copy()
 
 st.subheader("Warnings and Failures")
@@ -431,18 +437,18 @@ if issues_df.empty:
     st.success("No warnings or failures in this run.")
 else:
     for _, row in issues_df.iterrows():
-        header = f"{row['check_name']} | {row['status'].upper()} | {row['layer_name']}.{row['table_name']}"
-        if row["status"] == "fail":
-            box = st.expander(header, expanded=True)
-        else:
-            box = st.expander(header, expanded=False)
+        layer = row["layer_name"] or "unknown"
+        badge = LAYER_BADGE.get(layer, layer)
+        status_label = "🔴 FAIL" if row["status"] == "fail" else "🟠 WARN"
+        header = f"{status_label} | {badge} | {row['check_name']}"
 
-        with box:
+        with st.expander(header, expanded=row["status"] == "fail"):
             c1, c2, c3 = st.columns(3)
             c1.write(f"**Metric**: {row['metric_name']}")
             c2.write(f"**Metric Value**: {row['metric_value']}")
             c3.write(f"**Threshold**: {row['threshold_value']}")
 
+            st.write(f"**Table**: `{row['layer_name']}.{row['table_name']}`")
             st.write(f"**Details**: {row['details']}")
             st.write(f"**AI Explanation**: {row['ai_explanation'] or 'N/A'}")
             st.write(f"**Likely Causes**: {row['likely_causes'] or 'N/A'}")
