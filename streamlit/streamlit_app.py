@@ -330,13 +330,13 @@ def format_run_label(row: pd.Series) -> str:
 
 
 st.set_page_config(
-    page_title="Retail Data Quality Monitor",
+    page_title="Retail Analytics Data Quality Monitor",
     page_icon="📊",
     layout="wide",
 )
 
-st.title("Retail Data Quality Monitor")
-st.caption("Warehouse health checks, anomaly detection, and AI explanations")
+st.title("Retail Analytics Data Quality Monitor")
+st.caption("Interactive site for Warehouse health checks, AI explanations, ")
 
 recent_runs_df = get_recent_runs()
 

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.bash import BashOperator
@@ -7,6 +7,20 @@ from airflow.providers.standard.operators.bash import BashOperator
 REPO_ROOT = "/opt/project"
 DBT_PROJECT_DIR = f"{REPO_ROOT}/shopify_retail_dbt"
 DBT_PROFILES_DIR = "/home/airflow/.dbt"
+
+# Retry configs
+# Shopify API tasks: 3 retries with exponential backoff — handles rate limits and transient timeouts
+SHOPIFY_RETRY_ARGS = dict(
+    retries=3,
+    retry_delay=timedelta(seconds=30),
+    retry_exponential_backoff=True,
+)
+
+# BigQuery / dbt tasks: 2 retries with a short fixed delay — handles network blips
+BQ_RETRY_ARGS = dict(
+    retries=2,
+    retry_delay=timedelta(seconds=15),
+)
 
 
 with DAG(
@@ -24,41 +38,49 @@ with DAG(
     seed_test_customers = BashOperator(
         task_id="seed_test_customers",
         bash_command=f"cd {REPO_ROOT} && python src/ingest/seed_test_customers.py",
+        **SHOPIFY_RETRY_ARGS,
     )
 
     seed_test_orders = BashOperator(
         task_id="seed_test_orders",
         bash_command=f"cd {REPO_ROOT} && python src/ingest/seed_test_orders.py",
+        **SHOPIFY_RETRY_ARGS,
     )
 
     extract_products_to_gcs = BashOperator(
         task_id="extract_products_to_gcs",
         bash_command=f"cd {REPO_ROOT} && python src/ingest/extract_products_to_gcs.py",
+        **SHOPIFY_RETRY_ARGS,
     )
 
     extract_customers_to_gcs = BashOperator(
         task_id="extract_customers_to_gcs",
         bash_command=f"cd {REPO_ROOT} && python src/ingest/extract_customers_to_gcs.py",
+        **SHOPIFY_RETRY_ARGS,
     )
 
     extract_orders_to_gcs = BashOperator(
         task_id="extract_orders_to_gcs",
         bash_command=f"cd {REPO_ROOT} && python src/ingest/extract_orders_to_gcs.py",
+        **SHOPIFY_RETRY_ARGS,
     )
 
     load_products_bronze = BashOperator(
         task_id="load_products_bronze",
         bash_command=f"cd {REPO_ROOT} && python src/load/load_products_bronze.py",
+        **BQ_RETRY_ARGS,
     )
 
     load_customers_bronze = BashOperator(
         task_id="load_customers_bronze",
         bash_command=f"cd {REPO_ROOT} && python src/load/load_customers_bronze.py",
+        **BQ_RETRY_ARGS,
     )
 
     load_orders_bronze = BashOperator(
         task_id="load_orders_bronze",
         bash_command=f"cd {REPO_ROOT} && python src/load/load_orders_bronze.py",
+        **BQ_RETRY_ARGS,
     )
 
     dbt_run = BashOperator(
@@ -67,6 +89,7 @@ with DAG(
             f"cd {DBT_PROJECT_DIR} && "
             f"dbt run --profiles-dir {DBT_PROFILES_DIR}"
         ),
+        **BQ_RETRY_ARGS,
     )
 
     dbt_test = BashOperator(
@@ -75,6 +98,7 @@ with DAG(
             f"cd {DBT_PROJECT_DIR} && "
             f"dbt test --profiles-dir {DBT_PROFILES_DIR}"
         ),
+        **BQ_RETRY_ARGS,
     )
 
     run_data_quality_checks = BashOperator(
@@ -83,6 +107,7 @@ with DAG(
             f"cd {REPO_ROOT} && "
             f"python src/validation/run_data_quality_checks.py"
         ),
+        **BQ_RETRY_ARGS,
     )
 
     # Seed test data first
